@@ -2,56 +2,57 @@ import { useQuery } from 'react-query';
 
 import { fetchFrameData } from '@/api/endpoints/frame-data.api';
 
-const getMsUntilNextFetch = () => {
-  const now = new Date();
-  const next = new Date(now);
-
-  if (now.getHours() < 6) {
-    next.setHours(6, 0, 0, 0);
-  } else if (now.getHours() < 18) {
-    next.setHours(18, 0, 0, 0);
-  } else {
-    next.setDate(next.getDate() + 1);
-    next.setHours(6, 0, 0, 0);
-  }
-
-  return next.getTime() - Date.now();
-};
-
 export const useNamazTimings = () => {
   return useQuery('namazTimings', () => fetchFrameData.namazTimings(), {
-    refetchInterval: getMsUntilNextFetch,
-    staleTime: Infinity,
+    // Twice daily: 12 hours interval (morning and night)
+    refetchInterval: 12 * 60 * 60 * 1000, // 12 hours
+    staleTime: 12 * 60 * 60 * 1000, // 12 hours
+    cacheTime: 24 * 60 * 60 * 1000, // 24 hours
+    keepPreviousData: true, // Keep previous data if API fails
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 };
 
 export const useBanners = () => {
   return useQuery('banners', () => fetchFrameData.banners(), {
-     staleTime: 24 * 60 * 60 * 1000, // 24 hours
-      cacheTime: 24 * 60 * 60 * 1000,
-      refetchOnWindowFocus: false,
-      refetchOnReconnect: false,
-      refetchOnMount: false,
+    // Every 3 minutes
+    refetchInterval: 3 * 60 * 1000, // 3 minutes
+    staleTime: 3 * 60 * 1000, // 3 minutes
+    cacheTime: 10 * 60 * 1000, // 10 minutes
+    keepPreviousData: true, // Keep previous data if API fails
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 };
 
 export const useTickers = () => {
-  return useQuery('tickers', () => fetchFrameData.tickers({
-         staleTime: 24 * 60 * 60 * 1000, // 24 hours
-      cacheTime: 24 * 60 * 60 * 1000,
+  return useQuery('tickers', () =>
+    fetchFrameData.tickers({
+      // Twice daily: 12 hours interval (morning and night)
+      refetchInterval: 12 * 60 * 60 * 1000, // 12 hours
+      staleTime: 12 * 60 * 60 * 1000, // 12 hours
+      cacheTime: 24 * 60 * 60 * 1000, // 24 hours
+      keepPreviousData: true, // Keep previous data if API fails
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
       refetchOnMount: false,
-  }));
+    })
+  );
 };
 
 export const useMasjidConfig = () => {
   return useQuery('masjidConfig', () => fetchFrameData.masjidConfig(), {
-     staleTime: 24 * 60 * 60 * 1000, // 24 hours
-      cacheTime: 24 * 60 * 60 * 1000,
-      refetchOnWindowFocus: false,
-      refetchOnReconnect: false,
-      refetchOnMount: false,
+    // Twice daily: 12 hours interval (morning and night)
+    refetchInterval: 12 * 60 * 60 * 1000, // 12 hours
+    staleTime: 12 * 60 * 60 * 1000, // 12 hours
+    cacheTime: 24 * 60 * 60 * 1000, // 24 hours
+    keepPreviousData: true, // Keep previous data if API fails
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 };
 
@@ -61,11 +62,26 @@ export const useIqamahTimes = (year?: number, month?: number) => {
     () => fetchFrameData.iqamahTimes(year as number, month as number),
     {
       enabled: Boolean(year && month),
-      staleTime: 24 * 60 * 60 * 1000, // 24 hours
-      cacheTime: 24 * 60 * 60 * 1000,
+      // Twice daily: 12 hours interval (morning and night)
+      refetchInterval: 12 * 60 * 60 * 1000, // 12 hours
+      staleTime: 12 * 60 * 60 * 1000, // 12 hours
+      cacheTime: 24 * 60 * 60 * 1000, // 24 hours
+      keepPreviousData: true, // Keep previous data if API fails
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
       refetchOnMount: false,
     }
   );
+};
+
+export const usePages = () => {
+  return useQuery('pages', () => fetchFrameData.pages(), {
+   refetchInterval: 1 * 60 * 1000, // 3 minutes
+    staleTime: 3 * 60 * 1000, // 3 minutes
+    cacheTime: 10 * 60 * 1000, // 10 minutes
+    keepPreviousData: true, // Keep previous data if API fails
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
+  });
 };

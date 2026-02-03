@@ -1,6 +1,7 @@
 import ImageSlider from '@/components/common/Carosel';
 import SimpleQRCode from '@/components/common/qr';
-import TextTicker from 'react-native-text-ticker'
+import TextTicker from 'react-native-text-ticker';
+import SecondaryScreen from './SecondaryScreen';
 
 import {
   useBanners,
@@ -8,10 +9,12 @@ import {
   useMasjidConfig,
   useNamazTimings,
   useTickers,
+  usePages,
 } from '@/api/hooks/use-frame-data';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, Text, Animated, Image } from 'react-native';
+import { View, StyleSheet, Text, Image, Pressable, ActivityIndicator, Modal } from 'react-native';
 import { Divider } from 'react-native-paper';
+import { BlurView } from '@react-native-community/blur';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
@@ -23,37 +26,90 @@ dayjs.extend(duration);
 
 const Screen = () => {
   const [currentTime, setCurrentTime] = useState('--:--');
-  const animation = useRef(new Animated.Value(0)).current;
-  const { data: namazData } = useNamazTimings();
-  const { data: bannersData } = useBanners();
-  const { data: masjidConfig } = useMasjidConfig();
-  const { data: tickersData } = useTickers();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showIqamahCountdown, setShowIqamahCountdown] = useState(false);
+  const [iqamahCountdownData, setIqamahCountdownData] = useState<{
+    name: string;
+    secondsRemaining: number;
+  } | null>(null);
+  const [showSecondaryScreen, setShowSecondaryScreen] = useState(false);
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const { data: namazData, refetch: refetchNamaz } = useNamazTimings();
+  const { data: bannersData, refetch: refetchBanners } = useBanners();
+  const { data: masjidConfig, refetch: refetchMasjidConfig } = useMasjidConfig();
+  // const { data: tickersData, refetch: refetchTickers } = useTickers();
+  const { data: pagesData, refetch: refetchPages } = usePages();
   const timeZone = masjidConfig?.data?.timeZone;
-  const getNow = () =>  dayjs()
+  const getNow = () => dayjs();
   const iqamahYear = masjidConfig?.data?.year ?? getNow().year();
   const iqamahMonth = masjidConfig?.data?.month ?? getNow().month() + 1;
-  const { data: iqamahData } = useIqamahTimes(iqamahYear, iqamahMonth);
+  const { data: iqamahData, refetch: refetchIqamah } = useIqamahTimes(iqamahYear, iqamahMonth);
 
-  React.useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(animation, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: false,
-        }),
-        Animated.timing(animation, {
-          toValue: 0,
-          duration: 1000,
-          useNativeDriver: false,
-        }),
-      ])
-    );
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        refetchNamaz(),
+        refetchBanners(),
+        refetchMasjidConfig(),
+        // refetchTickers(),
+        refetchIqamah(),
+        refetchPages(),
+      ]);
+    } catch (error) {
+      // console.log('Refresh error:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
-    loop.start();
+  const handleLastImageComplete = () => {
+    // Check if pages data has length
+    const hasPages = pagesData && pagesData.length > 0;
+    console.log('Pages data:', pagesData);
 
-    return () => loop.stop();
-  }, [animation]);
+    if (!hasPages) {
+      console.log('No pages data, continuing carousel loop');
+      return; // Just loop the carousel
+    }
+    
+    console.log(`Pages data exists (${pagesData.length} pages), switching to secondary screen`);
+    
+    // Start showing pages from index 0
+    setCurrentPageIndex(0);
+    setShowSecondaryScreen(true);
+    
+    // Start the page cycling logic
+    cyclePages(0);
+  };
+
+  const cyclePages = (pageIndex: number) => {
+    if (!pagesData || pageIndex >= pagesData.length) {
+      // All pages shown, return to main screen
+      console.log('All pages shown, returning to main screen');
+      setShowSecondaryScreen(false);
+      setCurrentPageIndex(0);
+      return;
+    }
+
+    const currentPage = pagesData[pageIndex];
+    const pageDuration = (currentPage.pageDuration || 10) * 1000; // Convert to milliseconds, default 10 seconds
+    
+    console.log(`Showing page ${pageIndex + 1}/${pagesData.length} for ${currentPage.pageDuration} seconds`);
+
+    setTimeout(() => {
+      const nextIndex = pageIndex + 1;
+      
+      if (nextIndex < pagesData.length) {
+        // Move to next page without transition
+        setCurrentPageIndex(nextIndex);
+        cyclePages(nextIndex);
+      } else {
+        // Last page, return to main screen
+        cyclePages(nextIndex);
+      }
+    }, pageDuration);
+  };
 
   const extractDate = () => {
     const day = getNow().date();
@@ -140,45 +196,6 @@ const Screen = () => {
 
   const [activeNamaz, setActiveNamaz] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!namazData?.data?.length) return;
-
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-
-    const tick = () => {
-      setCurrentTime(getNow().format('hh:mm:ss A'));
-      setActiveNamaz(getCurrentNamaz());
-    };
-
-    const start = () => {
-      tick();
-      const delay = 1000 - (Date.now() % 1000);
-      timeoutId = setTimeout(() => {
-        tick();
-        intervalId = setInterval(tick, 1000);
-      }, delay);
-    };
-
-    start();
-
-    return () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, [namazData]);
-
-  const backgroundColor1 = animation.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['#c51111', '#840202'],
-  });
-  const backgroundColor2 = animation.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['#840202', '#c51111'],
-  });
-
-  const animatedStyle1 = { backgroundColor: backgroundColor1 } as const;
-  const animatedStyle2 = { backgroundColor: backgroundColor2 } as const;
   const todayData = namazData?.data?.[extractDate()];
   const todayDateString = getNow().format('YYYY-MM-DD');
   const todayIqamah = iqamahData?.data?.find(
@@ -242,6 +259,68 @@ const Screen = () => {
     maghribIqamahTime,
   ]);
 
+  useEffect(() => {
+    if (!namazData?.data?.length) return;
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const tick = () => {
+      setCurrentTime(getNow().format('hh:mm:ss A'));
+      setActiveNamaz(getCurrentNamaz());
+      
+      // Check if any Iqamah is within 30 seconds
+      const now = getNow();
+      
+      // console.log('Checking Iqamah schedule:', iqamahSchedule.length, 'items');
+      
+      for (const item of iqamahSchedule) {
+        const { iqamahTime } = item;
+        if (!iqamahTime) {
+          // console.log(`${item.name} has no iqamah time`);
+          continue;
+        }
+        
+        const secondsUntilIqamah = iqamahTime.diff(now, 'second');
+        
+        // console.log(`${item.name} Iqamah in ${secondsUntilIqamah} seconds`);
+        
+        if (secondsUntilIqamah > 0 && secondsUntilIqamah <= 30) {
+          // console.log(`SHOWING COUNTDOWN for ${item.name}!`);
+          setShowIqamahCountdown(true);
+          setIqamahCountdownData({
+            name: item.name,
+            secondsRemaining: secondsUntilIqamah,
+          });
+          return;
+        }
+      }
+      
+      // If no Iqamah within 30 seconds, hide countdown
+      if (showIqamahCountdown) {
+        // console.log('Hiding countdown - no Iqamah within 30 seconds');
+        setShowIqamahCountdown(false);
+        setIqamahCountdownData(null);
+      }
+    };
+
+    const start = () => {
+      tick();
+      const delay = 1000 - (Date.now() % 1000);
+      timeoutId = setTimeout(() => {
+        tick();
+        intervalId = setInterval(tick, 1000);
+      }, delay);
+    };
+
+    start();
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [namazData, iqamahSchedule, showIqamahCountdown]);
+
   const getNextIqamah = () => {
     const now = getNow();
 
@@ -267,6 +346,22 @@ const Screen = () => {
       }
     }
 
+    // If no iqamah found for today, return tomorrow's Fajr
+    const tomorrowDateString = getNow().add(1, 'day').format('YYYY-MM-DD');
+    const tomorrowIqamah = iqamahData?.data?.find(
+      (item) => item.date === tomorrowDateString
+    );
+
+    if (tomorrowIqamah?.fajr) {
+      const tomorrowFajrTime = parseIqamahTime(
+        tomorrowDateString,
+        tomorrowIqamah.fajr
+      );
+      if (tomorrowFajrTime) {
+        return { name: 'Fajr', time: tomorrowFajrTime };
+      }
+    }
+
     return null;
   };
 
@@ -277,13 +372,14 @@ const Screen = () => {
   const nextIqamahInText = nextIqamahIn
     ? `${String(nextIqamahIn.hours()).padStart(2, '0')}:${String(nextIqamahIn.minutes()).padStart(2, '0')}:${String(nextIqamahIn.seconds()).padStart(2, '0')}`
     : '--:--';
-  const bannerImages = bannersData?.data?.map((banner) => banner.url) ?? [];
 
+  const bannerImages = bannersData?.data ?? [];
+
+  // console.log('Banners Data:', bannerImages);
   const sliderImages = bannerImages.length ? bannerImages : [];
-  const fallbackTickerText =
-    'Announcement: Timings are changing from Jan 1 • Please check the latest schedule •';
+  const fallbackTickerText = '•';
   const parseTickerText = (text?: string | null) => {
-    const raw = text?.trim();
+    const raw = text?.trim() + '     •     ';
     if (!raw) return null;
     return raw
       .split('|||')
@@ -292,11 +388,11 @@ const Screen = () => {
       .join('     •     ');
   };
   const tickerFromConfig = parseTickerText(masjidConfig?.data?.tickerText);
-  const tickerFromApi = tickersData?.data
-    ?.map((item) => parseTickerText(item.text))
-    .filter(Boolean)
-    .join( '     •     ');
-  const tickerText = tickerFromApi || tickerFromConfig || fallbackTickerText;
+  // const tickerFromApi = tickersData?.data
+  //   ?.map((item) => parseTickerText(item.text))
+  //   .filter(Boolean)
+  //   .join('     •     ');
+  const tickerText =tickerFromConfig || fallbackTickerText;
 
   const nextIqamahChange = useMemo(() => {
     const data = iqamahData?.data;
@@ -337,8 +433,7 @@ const Screen = () => {
     ? dayjs(nextIqamahChange.date).format('MMM D, YYYY')
     : '--';
 
-  const maghribChangeText = 
-    `Sunset+${maghribAdditionMinutes}`
+  const maghribChangeText = `Sunset+${maghribAdditionMinutes} min`;
 
   const getCardStyle = (namaz: string) => ({
     backgroundColor: activeNamaz === namaz ? '#ff9800' : '#051842',
@@ -351,10 +446,51 @@ const Screen = () => {
 
   return (
     <View style={styles.container}>
+      {showSecondaryScreen ? (
+        <View style={styles.animatedContainer}>
+          <SecondaryScreen 
+            todayData={todayData}
+            iqamahTimes={iqamahTimes}
+            maghribIqamahTime={maghribIqamahTime}
+            activeNamaz={activeNamaz}
+            formatTime={formatTime}
+            formatDisplayTime={formatDisplayTime}
+            formatDisplayFromDayjs={formatDisplayFromDayjs}
+            getCardStyle={getCardStyle}
+            currentPage={pagesData?.[currentPageIndex]}
+            pageNumber={currentPageIndex + 1}
+            totalPages={pagesData?.length || 0}
+          />
+          <View style={styles.ticker}>
+            <Image
+              source={require('@/assets/logo-bis-black.png')}
+              style={styles.tickerLogo}
+              resizeMode="contain"
+            />
+            <TextTicker
+              style={styles.tickerText}
+              loop
+              scroll
+              bounce={false}
+              scrollSpeed={15}
+              repeatSpacer={15}
+              marqueeDelay={0}
+              animationType="scroll"
+            >
+              {tickerText}
+            </TextTicker>
+          </View>
+        </View>
+      ) : (
+        <View style={styles.animatedContainer}>
+        <>
       <View style={styles.content}>
         <View style={styles.aBox}>
           <View style={styles.a1}>
-            <ImageSlider images={sliderImages} />
+            <ImageSlider 
+              images={sliderImages} 
+              onLastImageComplete={handleLastImageComplete}
+            />
           </View>
           <View style={styles.a2}>
             <View style={styles.a21}>
@@ -447,13 +583,14 @@ const Screen = () => {
                 <Text style={styles.iqamahTime}>9:00 PM</Text>
               </View> */}
             </View>
-            <Animated.View style={[styles.a22]}>
+            <View style={[styles.a22]}>
               <Text style={styles.changeLabel}>
-                Iqamah times starting from <Text style={{ fontWeight: '900' }}>{changeDateLabel}</Text> will be as
-                follows{' '}
+                Iqamah times starting from{' '}
+                <Text style={{ fontWeight: '900' }}>{changeDateLabel}</Text>{' '}
+                will be as follows{' '}
               </Text>
-            </Animated.View>
-            <Animated.View style={[styles.a23]}>
+            </View>
+            <View style={styles.a23}>
               <View style={styles.a23FiveCard}>
                 <Text
                   style={
@@ -509,7 +646,7 @@ const Screen = () => {
                   {formatDisplayTime(nextIqamahChange?.times.isha)}
                 </Text>
               </View>
-            </Animated.View>
+            </View>
           </View>
         </View>
         <View style={styles.bBox}>
@@ -623,25 +760,53 @@ const Screen = () => {
         </Text> */}
         {/* <ContinuousTicker text="Breaking News: React Native is awesome! I am good boy i am also gong there and here and also working hard with it. 🚀🔥" speed={50} /> */}
         {/* <TickerText text={"Please park appropriately and don't block any other cars or exits. In case you parked parallel please go out ASAP after prayers to move your vehicle|||Donate generously and become part of Mohsineen program by setting up monthly donations."} /> */}
-   {/* <Ticker 
+        {/* <Ticker 
   text="This is a very long paragraph that will scroll continuously across the screen like a news ticker or headline banner as seen on television broadcasts and websites and other media outlets to grab attention and convey important information in a dynamic way."
   speed={60}
   style={{ backgroundColor: '#f0f0f0', padding: 10 }}
   textStyle={{ fontSize: 18, color: '#333' }}
 />  */}
 
-  <TextTicker
+        <TextTicker
           style={styles.tickerText}
-          duration={15000}
-          loop
-          bounce
-          repeatSpacer={50}
-          marqueeDelay={1000}
+          loop // infinite loop
+          scroll // enable automatic scrolling
+          bounce={false} // disable bounce
+          scrollSpeed={15} // pixels per second (adjust for desired speed)
+          repeatSpacer={15} // no space between repeats
+          marqueeDelay={0} // start immediately
+          animationType="scroll" // linear scroll
         >
-{tickerText}
+          {tickerText}
         </TextTicker>
-
       </View>
+      </>
+        </View>
+      )}
+
+      {/* Iqamah Countdown Overlay - Shows on top of everything */}
+      {showIqamahCountdown && iqamahCountdownData && (
+        <View style={styles.iqamahOverlay}>
+          <BlurView
+            style={styles.blurView}
+            blurType="dark"
+            blurAmount={10}
+            reducedTransparencyFallbackColor="rgba(0, 0, 0, 0.8)"
+          />
+          <View style={styles.iqamahCountdownContainer}>
+            <View style={styles.clockCircle}>
+              <Text style={styles.iqamahCountdownTime}>
+                {iqamahCountdownData.secondsRemaining}
+              </Text>
+              <Text style={styles.secondsLabel}>SEC</Text>
+            </View>
+            <Text style={styles.iqamahCountdownTitle}>
+              {iqamahCountdownData.name.toUpperCase()}
+            </Text>
+            <Text style={styles.iqamahCountdownLabel}>IQAMAH STARTING</Text>
+          </View>
+        </View>
+      )}
     </View>
   );
 };
@@ -652,6 +817,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     flexDirection: 'column',
+  },
+
+  animatedContainer: {
+    flex: 1,
   },
 
   content: {
@@ -692,18 +861,18 @@ const styles = StyleSheet.create({
   },
   a22: {
     flex: 2,
-    backgroundColor: '#909090',
+    backgroundColor: '#6d6d6d',
     justifyContent: 'center',
     alignItems: 'center',
   },
   a23: {
-    backgroundColor: '#686868',
+    // backgroundColor: '#f26d6d',
     flex: 3,
     flexDirection: 'row',
   },
   a23FiveCard: {
     flex: 2,
-    backgroundColor: '#909090',
+    backgroundColor: '#969696',
     // backgroundColor: '#e82727',
     justifyContent: 'center',
     alignItems: 'center',
@@ -742,7 +911,7 @@ const styles = StyleSheet.create({
 
   changeTime: {
     fontSize: 18,
-    fontWeight: '300',
+    fontWeight: '400',
     color: '#ffffff',
   },
 
@@ -757,7 +926,7 @@ const styles = StyleSheet.create({
 
   b1: {
     flex: 6,
-    backgroundColor: '#e0e0e0',
+    backgroundColor: '#f0f0f0',
   },
   b11: {
     paddingTop: 20,
@@ -783,7 +952,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: '#131313',
+    backgroundColor: '#c9c9c9',
   },
   b13: {
     paddingTop: 15,
@@ -887,7 +1056,8 @@ const styles = StyleSheet.create({
   },
 
   ticker: {
-    flex: 1,
+    padding: 10,
+    // flex: 0.5,
     backgroundColor: '#fdfdfd',
     justifyContent: 'center',
     alignItems: 'center',
@@ -896,8 +1066,8 @@ const styles = StyleSheet.create({
 
   tickerLogo: {
     position: 'absolute',
-    right: 0,
-    width: 90,
+    right: 5,
+    width: 110,
     height: 30,
     zIndex: 10,
     paddingRight: 10,
@@ -920,7 +1090,86 @@ const styles = StyleSheet.create({
 
   tickerText: {
     color: 'rgb(0, 0, 0)',
-    fontSize: 13,
+    fontSize: 16,
     fontWeight: '700',
+  },
+
+  iqamahOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9999,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  blurView: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+
+  iqamahCountdownContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    paddingVertical: 40,
+    paddingHorizontal: 50,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 280,
+    borderWidth: 1,
+    borderColor: 'rgba(5, 24, 66, 0.1)',
+  },
+
+  clockCircle: {
+    width: 130,
+    height: 130,
+    borderRadius: 65,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+    borderWidth: 3,
+    borderColor: '#ff9800',
+    shadowColor: '#ff9800',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+
+  iqamahCountdownTitle: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: '#051842',
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+
+  iqamahCountdownLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#666666',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+
+  iqamahCountdownTime: {
+    fontSize: 64,
+    fontWeight: '700',
+    color: '#ff9800',
+  },
+
+  secondsLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#999999',
+    marginTop: 2,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
   },
 });

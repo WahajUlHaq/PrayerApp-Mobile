@@ -3,11 +3,21 @@ import { View, FlatList, Image, StyleSheet, Dimensions, Animated } from 'react-n
 
 const { width } = Dimensions.get('window');
 
+interface Banner {
+  url: string;
+  duration?: number;
+  filename?: string;
+  size?: number;
+  mimeType?: string;
+  order?: number;
+}
+
 interface BannerCarouselProps {
-  images: string[];
+  images: Banner[];
   autoScrollInterval?: number;
   width?: number;
   height?: number;
+  onLastImageComplete?: () => void;
 }
 
 const BannerCarousel: React.FC<BannerCarouselProps> = ({
@@ -15,36 +25,66 @@ const BannerCarousel: React.FC<BannerCarouselProps> = ({
   autoScrollInterval = 10000,
   width: carouselWidth = 690,
   height: carouselHeight = 290,
+  onLastImageComplete,
 }) => {
   const flatListRef = useRef<FlatList>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const progressAnim = useRef(new Animated.Value(0)).current;
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const animationRef = useRef<Animated.CompositeAnimation | null>(null);
 
-  // Auto-scroll effect
+  // Auto-scroll effect with individual durations
   useEffect(() => {
     if (images.length <= 1) return;
 
-    const timer = setInterval(() => {
+    const currentBanner = images[currentIndex];
+    const duration = (currentBanner?.duration || autoScrollInterval / 1000) * 1000; // Convert to milliseconds
+    
+    console.log(`Banner ${currentIndex} duration: ${duration}ms`);
+    
+    // Clear any existing timer and animation
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    
+    if (animationRef.current) {
+      animationRef.current.stop();
+      animationRef.current = null;
+    }
+
+    // Start progress animation for current slide
+    progressAnim.setValue(0);
+    animationRef.current = Animated.timing(progressAnim, {
+      toValue: 1,
+      duration: duration,
+      useNativeDriver: false,
+    });
+    animationRef.current.start();
+
+    // Schedule next slide
+    timerRef.current = setTimeout(() => {
       const nextIndex = (currentIndex + 1) % images.length;
+      
+      // Check if we're completing the last image
+      if (currentIndex === images.length - 1 && onLastImageComplete) {
+        console.log('Last image completed, triggering callback');
+        onLastImageComplete();
+      }
+      
       flatListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
       setCurrentIndex(nextIndex);
-      progressAnim.setValue(0); // reset progress
-      Animated.timing(progressAnim, {
-        toValue: 1,
-        duration: autoScrollInterval,
-        useNativeDriver: false,
-      }).start();
-    }, autoScrollInterval);
+    }, duration);
 
-    // start first progress animation
-    Animated.timing(progressAnim, {
-      toValue: 1,
-      duration: autoScrollInterval,
-      useNativeDriver: false,
-    }).start();
-
-    return () => clearInterval(timer);
-  }, [currentIndex, images.length, autoScrollInterval]);
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+      if (animationRef.current) {
+        animationRef.current.stop();
+      }
+    };
+  }, [currentIndex, images, autoScrollInterval, progressAnim]);
 
   const progressWidth = progressAnim.interpolate({
     inputRange: [0, 1],
@@ -66,7 +106,7 @@ const BannerCarousel: React.FC<BannerCarouselProps> = ({
           <View style={[styles.slide, { width: carouselWidth, height: carouselHeight }]}
           >
             <Image
-              source={{ uri: item }}
+              source={{ uri: item.url }}
               style={[styles.image, { width: carouselWidth, height: carouselHeight }]}
               resizeMode="stretch"
             />

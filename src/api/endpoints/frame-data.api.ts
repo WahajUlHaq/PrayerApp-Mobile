@@ -99,6 +99,21 @@ export interface IqamahTimesResponseInterface {
   }>;
 }
 
+export interface PagesResponseInterface extends Array<{
+  _id: string;
+  title: string;
+  pageType: 'text' | 'image' | 'image-text';
+  content?: string;
+  image?: string;
+  imageUrl?: string;
+  pageDuration: number;
+  order: number;
+  schedules: any[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}> {}
+
 export const fetchFrameData = {
   namazTimings: (): Promise<NamazTimingsResponseInterface> =>
     apiClient
@@ -125,5 +140,10 @@ export const fetchFrameData = {
       .get<IqamahTimesResponseInterface>('/iqamaah-times/month', {
         params: { year, month },
       })
+      .then((response) => response.data),
+
+  pages: (): Promise<PagesResponseInterface> =>
+    apiClient
+      .get<PagesResponseInterface>('/pages/mob')
       .then((response) => response.data),
 };
