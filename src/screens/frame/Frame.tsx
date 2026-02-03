@@ -2,6 +2,9 @@ import ImageSlider from '@/components/common/Carosel';
 import SimpleQRCode from '@/components/common/qr';
 import TextTicker from 'react-native-text-ticker';
 import SecondaryScreen from './SecondaryScreen';
+import { io } from 'socket.io-client';
+import { serverConfigs } from '@/constants/server-config';
+// import Ticker from "react-native-ticker";
 
 import {
   useBanners,
@@ -12,7 +15,7 @@ import {
   usePages,
 } from '@/api/hooks/use-frame-data';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, Text, Image, Pressable, ActivityIndicator, Modal } from 'react-native';
+import { View, StyleSheet, Text, Image, Pressable, ActivityIndicator, Modal, Animated } from 'react-native';
 import { Divider } from 'react-native-paper';
 import { BlurView } from '@react-native-community/blur';
 import dayjs from 'dayjs';
@@ -34,6 +37,11 @@ const Screen = () => {
   } | null>(null);
   const [showSecondaryScreen, setShowSecondaryScreen] = useState(false);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [loadingStates, setLoadingStates] = useState<{
+    visible: boolean;
+    apis: { name: string; loading: boolean; completed: boolean }[];
+  }>({ visible: false, apis: [] });
+  const loadingFadeAnim = useRef(new Animated.Value(0)).current;
   const { data: namazData, refetch: refetchNamaz } = useNamazTimings();
   const { data: bannersData, refetch: refetchBanners } = useBanners();
   const { data: masjidConfig, refetch: refetchMasjidConfig } = useMasjidConfig();
@@ -62,6 +70,188 @@ const Screen = () => {
       setIsRefreshing(false);
     }
   };
+
+  // Socket.io connection for real-time reload
+  useEffect(() => {
+    let isMounted = true;
+    const socketUrl = serverConfigs.socketBaseURL
+    let socket: any = null;
+    
+    try {
+      socket = io(socketUrl, {
+        transports: ['websocket'],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        timeout: 10000,
+      });
+
+      socket.on('connect', () => {
+        if (isMounted) {
+          console.log('Socket connected:', socket.id);
+        }
+      });
+
+      socket.on('disconnect', () => {
+        if (isMounted) {
+          console.log('Socket disconnected');
+        }
+      });
+
+      socket.on('connect_error', (error: any) => {
+        console.error('Socket connection error:', error);
+      });
+
+      socket.on('client:reload', async (data: any) => {
+        if (!isMounted) return;
+        
+        console.log('Reload signal received:', data);
+        
+        // Initialize loading states
+        const apiList = [
+          { name: 'Namaz Timings', loading: true, completed: false },
+          { name: 'Banners', loading: true, completed: false },
+          { name: 'Masjid Config', loading: true, completed: false },
+          { name: 'Iqamah Times', loading: true, completed: false },
+          { name: 'Pages', loading: true, completed: false },
+        ];
+        
+        if (!isMounted) return;
+        setLoadingStates({ visible: true, apis: apiList });
+        loadingFadeAnim.setValue(0);
+        Animated.timing(loadingFadeAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }).start();
+        
+        try {
+          // Refresh each API individually to track progress
+          if (isMounted && refetchNamaz) {
+            await refetchNamaz();
+            if (isMounted) {
+              setLoadingStates(prev => ({
+                ...prev,
+                apis: prev.apis.map((api, i) => i === 0 ? { ...api, loading: false, completed: true } : api)
+              }));
+            }
+          }
+          
+          if (isMounted && refetchBanners) {
+            await refetchBanners();
+            if (isMounted) {
+              setLoadingStates(prev => ({
+                ...prev,
+                apis: prev.apis.map((api, i) => i === 1 ? { ...api, loading: false, completed: true } : api)
+              }));
+            }
+          }
+          
+          if (isMounted && refetchMasjidConfig) {
+            await refetchMasjidConfig();
+            if (isMounted) {
+              setLoadingStates(prev => ({
+                ...prev,
+                apis: prev.apis.map((api, i) => i === 2 ? { ...api, loading: false, completed: true } : api)
+              }));
+            }
+          }
+          
+          if (isMounted && refetchIqamah) {
+            await refetchIqamah();
+            if (isMounted) {
+              setLoadingStates(prev => ({
+                ...prev,
+                apis: prev.apis.map((api, i) => i === 3 ? { ...api, loading: false, completed: true } : api)
+              }));
+            }
+          }
+          
+          if (isMounted && refetchPages) {
+            await refetchPages();
+            if (isMounted) {
+              setLoadingStates(prev => ({
+                ...prev,
+                apis: prev.apis.map((api, i) => i === 4 ? { ...api, loading: false, completed: true } : api)
+              }));
+            }
+          }
+          
+          if (!isMounted) return;
+          console.log('All data refreshed successfully');
+          
+          // Wait a bit to show all checkmarks, then fade out and restart cycle
+          setTimeout(() => {
+            if (!isMounted) return;
+            Animated.timing(loadingFadeAnim, {
+              toValue: 0,
+              duration: 500,
+              useNativeDriver: true,
+            }).start(() => {
+              if (!isMounted) return;
+              setLoadingStates({ visible: false, apis: [] });
+              
+              // Reset everything to initial state - restart the app cycle
+              setShowSecondaryScreen(false);
+              setCurrentPageIndex(0);
+              setShowIqamahCountdown(false);
+              setIqamahCountdownData(null);
+              
+              console.log('App cycle restarted from beginning');
+            });
+          }, 1000);
+          
+          // Confirm refresh is done
+          if (socket && socket.connected) {
+            socket.emit('client:refreshed', {
+              message: 'Data refreshed successfully',
+              timestamp: new Date().toISOString(),
+            });
+          }
+        } catch (error) {
+          console.error('Error refreshing data:', error);
+          
+          if (!isMounted) return;
+          
+          // Fade out on error
+          Animated.timing(loadingFadeAnim, {
+            toValue: 0,
+            duration: 300,
+            useNativeDriver: true,
+          }).start(() => {
+            if (isMounted) {
+              setLoadingStates({ visible: false, apis: [] });
+            }
+          });
+          
+          if (socket && socket.connected) {
+            socket.emit('client:refreshed', {
+              message: 'Data refresh failed',
+              error: String(error),
+              timestamp: new Date().toISOString(),
+            });
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error initializing socket:', error);
+    }
+
+    return () => {
+      isMounted = false;
+      if (socket) {
+        try {
+          socket.off('connect');
+          socket.off('disconnect');
+          socket.off('connect_error');
+          socket.off('client:reload');
+          socket.disconnect();
+        } catch (error) {
+          console.error('Error cleaning up socket:', error);
+        }
+      }
+    };
+  }, [refetchNamaz, refetchBanners, refetchMasjidConfig, refetchIqamah, refetchPages]);
 
   const handleLastImageComplete = () => {
     // Check if pages data has length
@@ -433,7 +623,7 @@ const Screen = () => {
     ? dayjs(nextIqamahChange.date).format('MMM D, YYYY')
     : '--';
 
-  const maghribChangeText = `Sunset+${maghribAdditionMinutes} min`;
+  const maghribChangeText = `Sunset + ${maghribAdditionMinutes} min`;
 
   const getCardStyle = (namaz: string) => ({
     backgroundColor: activeNamaz === namaz ? '#ff9800' : '#051842',
@@ -779,9 +969,40 @@ const Screen = () => {
         >
           {tickerText}
         </TextTicker>
+        {/* <Ticker textStyle={styles.tickerText} duration={2}>
+          {tickerText}
+</Ticker>; */}
       </View>
       </>
         </View>
+      )}
+
+      {/* Loading Overlay for Data Refresh */}
+      {loadingStates.visible && (
+        <Animated.View style={[styles.loadingOverlay, { opacity: loadingFadeAnim }]}>
+          <View style={styles.loadingContainer}>
+            <Text style={styles.loadingTitle}>Refreshing Data...</Text>
+            <View style={styles.loadingList}>
+              {loadingStates.apis.map((api, index) => (
+                <View key={index} style={styles.loadingItem}>
+                  <View style={styles.loadingCheckbox}>
+                    {api.completed ? (
+                      <Text style={styles.checkmark}>✓</Text>
+                    ) : api.loading ? (
+                      <ActivityIndicator size="small" color="#ff9800" />
+                    ) : null}
+                  </View>
+                  <Text style={[
+                    styles.loadingText,
+                    api.completed && styles.loadingTextCompleted
+                  ]}>
+                    {api.name}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        </Animated.View>
       )}
 
       {/* Iqamah Countdown Overlay - Shows on top of everything */}
@@ -872,7 +1093,7 @@ const styles = StyleSheet.create({
   },
   a23FiveCard: {
     flex: 2,
-    backgroundColor: '#969696',
+    backgroundColor: '#5c5c5c',
     // backgroundColor: '#e82727',
     justifyContent: 'center',
     alignItems: 'center',
@@ -1090,7 +1311,7 @@ const styles = StyleSheet.create({
 
   tickerText: {
     color: 'rgb(0, 0, 0)',
-    fontSize: 16,
+    fontSize: 22,
     fontWeight: '700',
   },
 
@@ -1171,5 +1392,73 @@ const styles = StyleSheet.create({
     marginTop: 2,
     letterSpacing: 1.2,
     textTransform: 'uppercase',
+  },
+
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10000,
+  },
+
+  loadingContainer: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 24,
+    minWidth: 280,
+    maxWidth: 350,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+
+  loadingTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#051842',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+
+  loadingList: {
+    gap: 10,
+  },
+
+  loadingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+
+  loadingCheckbox: {
+    width: 24,
+    height: 24,
+    marginRight: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  checkmark: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#4caf50',
+  },
+
+  loadingText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#333333',
+    flex: 1,
+  },
+
+  loadingTextCompleted: {
+    color: '#333333',
   },
 });

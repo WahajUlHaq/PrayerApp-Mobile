@@ -23,8 +23,8 @@ interface BannerCarouselProps {
 const BannerCarousel: React.FC<BannerCarouselProps> = ({
   images,
   autoScrollInterval = 10000,
-  width: carouselWidth = 690,
-  height: carouselHeight = 290,
+  width: carouselWidth = 680,
+  height: carouselHeight = 300,
   onLastImageComplete,
 }) => {
   const flatListRef = useRef<FlatList>(null);
@@ -145,8 +145,8 @@ const styles = StyleSheet.create({
   },
   progressWrapper: {
     position: 'absolute',
-    bottom: 16,
-    right: 16,
+    bottom: 15,
+    right: 15,
     width: 50,
     height: 10,
     borderRadius: 999,

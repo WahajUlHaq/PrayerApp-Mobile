@@ -76,7 +76,7 @@ export const useIqamahTimes = (year?: number, month?: number) => {
 
 export const usePages = () => {
   return useQuery('pages', () => fetchFrameData.pages(), {
-   refetchInterval: 1 * 60 * 1000, // 3 minutes
+   refetchInterval: 3 * 60 * 1000, // 3 minutes
     staleTime: 3 * 60 * 1000, // 3 minutes
     cacheTime: 10 * 60 * 1000, // 10 minutes
     keepPreviousData: true, // Keep previous data if API fails

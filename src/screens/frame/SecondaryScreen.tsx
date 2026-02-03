@@ -170,9 +170,50 @@ const SecondaryScreen: React.FC<SecondaryScreenProps> = ({
               {formatDisplayTime(iqamahTimes.Isha)}
             </Text>
           </View>
+           <View style={[styles.a212FiveCard]}>
+                          <Image
+                            source={require('@/assets/sunrise.png')}
+                            style={styles.sunIcon}
+                            resizeMode="contain"
+                          />
+                          <Text style={styles.namazTime}>
+                            {formatTime(todayData?.timings?.Sunrise)}
+                          </Text>
+                          <Text style={styles.namazLabel}>Sunrise</Text>
+                        </View>
+          
+                        <View style={[styles.a212FiveCard]}>
+                          <Image
+                            source={require('@/assets/sunset.png')}
+                            style={styles.sunIcon}
+                            resizeMode="contain"
+                          />
+                          <Text style={styles.namazTime}>
+                            {formatTime(todayData?.timings?.Sunset)}
+                          </Text>
+                          <Text style={styles.namazLabel}>Sunset</Text>
+                        </View>
+                      </View>
+             {/* <View style={[styles.a21FiveCard, getCardStyle('Isha')]}>
+            <Text style={styles.namazTime}>
+              {formatTime(todayData?.timings?.Isha)}
+            </Text>
+            <Text style={styles.namazLabel}>ISHA</Text>
+            <Text style={styles.iqamahTime}>
+              {formatDisplayTime(iqamahTimes.Isha)}
+            </Text>
+          </View>
+             <View style={[styles.a21FiveCard, getCardStyle('Isha')]}>
+            <Text style={styles.namazTime}>
+              {formatTime(todayData?.timings?.Isha)}
+            </Text>
+            <Text style={styles.namazLabel}>ISHA</Text>
+            <Text style={styles.iqamahTime}>
+              {formatDisplayTime(iqamahTimes.Isha)}
+            </Text>
+          </View> */}
         </View>
       </View>
-    </View>
   );
 };
 
@@ -213,16 +254,21 @@ const styles = StyleSheet.create({
     width: '100%',
     flex: 1,
   },
+ sunIcon: {
+    width: 22,
+    height: 22,
+    marginBottom: 4,
+  },  
   textOverlay: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    padding: 20,
+    backgroundColor: '#000000ac',
+    padding: 8,
   },
   overlayText: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: '600',
     color: '#ffffff',
     textAlign: 'center',
@@ -277,10 +323,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  a212FiveCard: {
+    flex: 1,
+    padding: 10,
+    backgroundColor: '#005231',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+  },
   progressWrapper: {
+    // position: 'absolute',
+    // bottom: 10,
+    // right: 16,
+    // width: 50,
+    // height: 10,
+    // borderRadius: 2,
+    // overflow: 'hidden',
     position: 'absolute',
-    bottom: 16,
-    right: 16,
+    bottom: 5,
+    right: 15,
     width: 50,
     height: 10,
     borderRadius: 999,
