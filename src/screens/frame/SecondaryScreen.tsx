@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Image, Animated } from 'react-native';
 import TextTicker from 'react-native-text-ticker';
 import dayjs from 'dayjs';
+import { activateKeepAwake, deactivateKeepAwake } from "@sayem314/react-native-keep-awake";
 
 interface SecondaryScreenProps {
   todayData: any;
@@ -52,6 +53,14 @@ const SecondaryScreen: React.FC<SecondaryScreenProps> = ({
   const progressAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    console.log('SecondaryScreen mounted');
+    activateKeepAwake();
+    return () => {
+      deactivateKeepAwake();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!currentPage) return;
 
     const duration = (currentPage.pageDuration || 10) * 1000;
@@ -90,8 +99,8 @@ const SecondaryScreen: React.FC<SecondaryScreenProps> = ({
             {currentPage.pageType === 'image' && currentPage.imageUrl && (
               <Image
                 source={{ uri: currentPage.imageUrl }}
-                style={{ width: '100%', height: '100%' }}
-                resizeMode="stretch"
+                style={styles.pageImage}
+                resizeMode="contain"
               />
             )}
             
@@ -100,8 +109,8 @@ const SecondaryScreen: React.FC<SecondaryScreenProps> = ({
                 {currentPage.imageUrl && (
                   <Image
                     source={{ uri: currentPage.imageUrl }}
-                    style={{ width: '100%', height: '100%' }}
-                    resizeMode="stretch"
+                    style={styles.pageImage}
+                resizeMode="contain"
                   />
                 )}
                 {currentPage.content && (
@@ -233,7 +242,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     // padding: 30,
-    backgroundColor: '#ffffff',
+    // backgroundColor: '#1ba24841',
     overflow: 'hidden',
   },
   pageTitle: {
@@ -252,7 +261,7 @@ const styles = StyleSheet.create({
   },
   pageImage: {
     width: '100%',
-    flex: 1,
+    height: '100%',
   },
  sunIcon: {
     width: 22,

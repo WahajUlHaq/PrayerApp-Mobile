@@ -5,11 +5,19 @@ import { Provider as ReduxProvider } from 'react-redux';
 import { QueryClientProvider } from 'react-query';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'react-native';
+import { activateKeepAwake, deactivateKeepAwake } from "@sayem314/react-native-keep-awake";
 
 import { queryClient } from '@/api/clients/query-client-configs';
 import AppNavigator from '@/navigation/app-navigator';
 
 const App = () => {
+  useEffect(() => {
+    activateKeepAwake();
+    return () => {
+      deactivateKeepAwake();
+    };
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       {/* <PaperProvider theme={theme}> */}

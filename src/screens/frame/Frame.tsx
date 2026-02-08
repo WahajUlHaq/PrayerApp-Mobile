@@ -5,6 +5,7 @@ import SecondaryScreen from './SecondaryScreen';
 import { io } from 'socket.io-client';
 import { serverConfigs } from '@/constants/server-config';
 // import Ticker from "react-native-ticker";
+import { activateKeepAwake, deactivateKeepAwake } from "@sayem314/react-native-keep-awake";
 
 import {
   useBanners,
@@ -28,6 +29,14 @@ import duration from 'dayjs/plugin/duration';
 dayjs.extend(duration);
 
 const Screen = () => {
+  useEffect(() => {
+    console.log('Frame Screen mounted');
+    activateKeepAwake();
+    return () => {
+      deactivateKeepAwake();
+    };
+  }, []);
+
   const [currentTime, setCurrentTime] = useState('--:--');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showIqamahCountdown, setShowIqamahCountdown] = useState(false);
@@ -37,6 +46,10 @@ const Screen = () => {
   } | null>(null);
   const [showSecondaryScreen, setShowSecondaryScreen] = useState(false);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [showA21, setShowA21] = useState(true);
+  const [zawalCountdown, setZawalCountdown] = useState<string>('');
+  const [announcementText, setAnnouncementText] = useState<string>('');
+  const [showAnnouncement, setShowAnnouncement] = useState(false);
   const [loadingStates, setLoadingStates] = useState<{
     visible: boolean;
     apis: { name: string; loading: boolean; completed: boolean }[];
@@ -100,6 +113,95 @@ const Screen = () => {
 
       socket.on('connect_error', (error: any) => {
         console.error('Socket connection error:', error);
+      });
+
+      // Listen for announcement trigger from server
+      socket.on('client:announce', async (data: any) => {
+        console.log('✅✅✅ CLIENT:ANNOUNCE EVENT RECEIVED ✅✅✅');
+        console.log('Event data:', JSON.stringify(data, null, 2));
+        
+        if (!isMounted) {
+          console.log('❌ Component not mounted, ignoring');
+          return;
+        }
+        
+        try {
+          // First, refetch masjid config to get the latest announcement text
+          console.log('📥 Refetching masjid config to get latest announcement...');
+          const result = await refetchMasjidConfig();
+          console.log('===== MASJID CONFIG API RESPONSE =====');
+          console.log('Full result:', JSON.stringify(result, null, 2));
+          console.log('result.data:', result.data);
+          console.log('result.data?.data:', result.data?.data);
+          console.log('======================================');
+          
+          // Get announcements text (note: plural field name)
+          let announcementFromConfig = result.data?.data?.announcements;
+          
+          if (!announcementFromConfig) {
+            // Try alternative path
+            announcementFromConfig = result.data?.announcements;
+          }
+          
+          console.log('Announcements from config (final):', announcementFromConfig);
+          console.log('Announcements type:', typeof announcementFromConfig);
+          
+          if (!announcementFromConfig || announcementFromConfig === '') {
+            console.log('⚠️ No announcements text in config');
+            
+            // Still send confirmation
+            if (socket && socket.connected) {
+              socket.emit('client:announced', {
+                clientId: socket.id,
+                status: 'received',
+                error: 'No announcements text in config',
+                timestamp: new Date().toISOString(),
+              });
+            }
+            return;
+          }
+          
+          // Parse announcements text - replace ||| with line breaks
+          const parsedAnnouncement = announcementFromConfig.replace(/\|\|\|/g, '\n');
+          console.log('📢 Showing announcement:', parsedAnnouncement);
+          console.log('📢 Setting states now...');
+          
+          // Show announcement for 5 seconds
+          setAnnouncementText(parsedAnnouncement);
+          setShowAnnouncement(true);
+          console.log('📢 States set - showAnnouncement should be TRUE');
+          console.log('📢 announcementText:', parsedAnnouncement);
+          
+          setTimeout(() => {
+            if (isMounted) {
+              console.log('⏰ Hiding announcement after 5 seconds');
+              setShowAnnouncement(false);
+              setAnnouncementText('');
+            }
+          }, 5000);
+          
+          // Confirm announcement received
+          if (socket && socket.connected) {
+            console.log('📤 Emitting client:announced confirmation');
+            socket.emit('client:announced', {
+              clientId: socket.id,
+              status: 'received',
+              timestamp: new Date().toISOString(),
+            });
+          }
+        } catch (error) {
+          console.error('❌ Error processing announcement:', error);
+          
+          // Send error confirmation
+          if (socket && socket.connected) {
+            socket.emit('client:announced', {
+              clientId: socket.id,
+              status: 'error',
+              error: String(error),
+              timestamp: new Date().toISOString(),
+            });
+          }
+        }
       });
 
       socket.on('client:reload', async (data: any) => {
@@ -244,6 +346,7 @@ const Screen = () => {
           socket.off('connect');
           socket.off('disconnect');
           socket.off('connect_error');
+          socket.off('client:announce');
           socket.off('client:reload');
           socket.disconnect();
         } catch (error) {
@@ -251,7 +354,7 @@ const Screen = () => {
         }
       }
     };
-  }, [refetchNamaz, refetchBanners, refetchMasjidConfig, refetchIqamah, refetchPages]);
+  }, [refetchNamaz, refetchBanners, refetchMasjidConfig, refetchIqamah, refetchPages, masjidConfig?.data?.announcement]);
 
   const handleLastImageComplete = () => {
     // Check if pages data has length
@@ -344,6 +447,64 @@ const Screen = () => {
   ) => {
     if (!value) return fallback;
     return value.format('hh:mm A');
+  };
+
+  const parseTimeString = (timeStr: string) => {
+    const [time, period] = timeStr.split(' ');
+    const [hourStr, minuteStr] = time.split(':');
+    let hour = parseInt(hourStr, 10);
+    const minute = parseInt(minuteStr, 10);
+    
+    if (period === 'PM' && hour !== 12) {
+      hour += 12;
+    } else if (period === 'AM' && hour === 12) {
+      hour = 0;
+    }
+    
+    return getNow().hour(hour).minute(minute).second(0).millisecond(0);
+  };
+
+  // Calculate zawal times based on sunrise, sunset, and dhuhr
+  const calculateZawalTimes = () => {
+    const timings = todayData?.timings;
+    if (!timings?.Sunrise || !timings?.Sunset || !timings?.Dhuhr) {
+      return null;
+    }
+
+    const sunrise = parseNamazTime(timings.Sunrise);
+    const sunset = parseNamazTime(timings.Sunset);
+    const dhuhr = parseNamazTime(timings.Dhuhr);
+
+    // First zawal: After sunrise, lasts 15 minutes
+    const firstZawalStart = sunrise;
+    const firstZawalEnd = sunrise.add(15, 'minute');
+
+    // Second zawal: Calculate midpoint from sunrise minus 15 minutes
+    // sunset - sunrise = x (total day length)
+    // x / 2 = y (half of the day)
+    // sunrise + y = z
+    // z - 15 = second zawal start time, end is Dhuhr
+    const sunriseSunsetDiff = sunset.diff(sunrise, 'minute');
+    const halfTime = Math.floor(sunriseSunsetDiff / 2);
+    const secondZawalStart = sunrise.add(halfTime, 'minute').subtract(15, 'minute');
+    const secondZawalEnd = dhuhr;
+
+    console.log('===== Zawal Times Calculated =====');
+    console.log('Sunrise:', sunrise.format('hh:mm A'));
+    console.log('Sunset:', sunset.format('hh:mm A'));
+    console.log('Dhuhr:', dhuhr.format('hh:mm A'));
+    console.log('Half Time (y):', halfTime, 'minutes');
+    console.log('---');
+    console.log('1st Zawal Start:', firstZawalStart.format('hh:mm A'));
+    console.log('1st Zawal End:', firstZawalEnd.format('hh:mm A'));
+    console.log('2nd Zawal Start:', secondZawalStart.format('hh:mm A'));
+    console.log('2nd Zawal End:', secondZawalEnd.format('hh:mm A'));
+    console.log('==================================');
+
+    return {
+      first: { start: firstZawalStart, end: firstZawalEnd },
+      second: { start: secondZawalStart, end: secondZawalEnd },
+    };
   };
 
   const getNamazSchedule = useMemo(() => {
@@ -456,11 +617,42 @@ const Screen = () => {
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
     const tick = () => {
-      setCurrentTime(getNow().format('hh:mm:ss A'));
+      const now = getNow();
+      setCurrentTime(now.format('hh:mm:ss A'));
       setActiveNamaz(getCurrentNamaz());
       
+      // Calculate zawal countdown
+      const zawalTimes = calculateZawalTimes();
+      
+      if (zawalTimes) {
+        const { first, second } = zawalTimes;
+        
+        // Check first zawal (after sunrise for 15 minutes)
+        if (now.isAfter(first.start) && now.isBefore(first.end)) {
+          const secondsLeft = first.end.diff(now, 'second');
+          const minutes = Math.floor(secondsLeft / 60);
+          const seconds = secondsLeft % 60;
+          const countdown = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+          console.log('First Zawal Active - Countdown:', countdown);
+          setZawalCountdown(countdown);
+        }
+        // Check second zawal (midpoint before Dhuhr)
+        else if (now.isAfter(second.start) && now.isBefore(second.end)) {
+          const secondsLeft = second.end.diff(now, 'second');
+          const minutes = Math.floor(secondsLeft / 60);
+          const seconds = secondsLeft % 60;
+          const countdown = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+          console.log('Second Zawal Active - Countdown:', countdown);
+          setZawalCountdown(countdown);
+        }
+        else {
+          setZawalCountdown('');
+        }
+      } else {
+        setZawalCountdown('');
+      }
+      
       // Check if any Iqamah is within 30 seconds
-      const now = getNow();
       
       // console.log('Checking Iqamah schedule:', iqamahSchedule.length, 'items');
       
@@ -629,6 +821,51 @@ const Screen = () => {
     backgroundColor: activeNamaz === namaz ? '#ff9800' : '#051842',
   });
 
+  // Determine if we should display the iqamah change screen
+  const shouldDisplayChangeTime = useMemo(() => {
+    const alwaysDisplayIqamaahTime = masjidConfig?.data?.alwaysDisplayIqamaahTime;
+    const displayTimerDuration = masjidConfig?.data?.displayTimerDuration; // in days
+    
+    // If alwaysDisplayIqamaahTime is true, always display
+    if (alwaysDisplayIqamaahTime === true) {
+      console.log('Display change time: ALWAYS (alwaysDisplayIqamaahTime = true)');
+      return true;
+    }
+    
+    // If displayTimerDuration is set and we have a next iqamah change
+    if (displayTimerDuration && nextIqamahChange) {
+      const now = getNow().startOf('day'); // Compare dates only, not time
+      const changeDate = dayjs(nextIqamahChange.date).startOf('day');
+      const daysUntilChange = changeDate.diff(now, 'day');
+      
+      console.log(`Display change time check: ${daysUntilChange} days until change, threshold: ${displayTimerDuration} days`);
+      
+      // Display if we're within the displayTimerDuration days BUT NOT on the change day itself
+      // Because on the change day, the times will auto-update, so no need to show
+      const shouldDisplay = daysUntilChange <= displayTimerDuration && daysUntilChange > 0;
+      console.log(`Display change time: ${shouldDisplay ? 'YES' : 'NO'} (excluding change day itself)`);
+      return shouldDisplay;
+    }
+    
+    // Default: don't display
+    console.log('Display change time: NO (no conditions met)');
+    return false;
+  }, [masjidConfig?.data?.alwaysDisplayIqamaahTime, masjidConfig?.data?.displayTimerDuration, nextIqamahChange]);
+
+  // Alternate between a21 and a22+a23 every 10 seconds when shouldDisplayChangeTime is true
+  useEffect(() => {
+    if (!shouldDisplayChangeTime) {
+      setShowA21(true);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setShowA21((prev) => !prev);
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [shouldDisplayChangeTime]);
+
   // const tickerTextF = () => {
   //   const text =
 
@@ -679,10 +916,12 @@ const Screen = () => {
           <View style={styles.a1}>
             <ImageSlider 
               images={sliderImages} 
+              secondaryText={zawalCountdown ? `Zawal time ends in: ${zawalCountdown}` : undefined}
               onLastImageComplete={handleLastImageComplete}
             />
           </View>
           <View style={styles.a2}>
+            {showA21 ? (
             <View style={styles.a21}>
               <View style={[styles.a21FiveCard, getCardStyle('Fajr')]}>
                 <Text style={styles.namazTime}>
@@ -698,7 +937,7 @@ const Screen = () => {
                 <Text style={styles.namazTime}>
                   {formatTime(todayData?.timings?.Dhuhr)}
                 </Text>
-                <Text style={styles.namazLabel}>DHUHR</Text>
+                <Text style={styles.namazLabel}>DEHUHR</Text>
                 <Text style={styles.iqamahTime}>
                   {formatDisplayTime(iqamahTimes.Dhuhr)}
                 </Text>
@@ -773,6 +1012,8 @@ const Screen = () => {
                 <Text style={styles.iqamahTime}>9:00 PM</Text>
               </View> */}
             </View>
+            ) : (
+            <>
             <View style={[styles.a22]}>
               <Text style={styles.changeLabel}>
                 Iqamah times starting from{' '}
@@ -782,6 +1023,7 @@ const Screen = () => {
             </View>
             <View style={styles.a23}>
               <View style={styles.a23FiveCard}>
+                <Text style={styles.changeLabelBold}>Fajr</Text>
                 <Text
                   style={
                     nextIqamahChange?.changes.fajr
@@ -793,6 +1035,7 @@ const Screen = () => {
                 </Text>
               </View>
               <View style={styles.a23FiveCard}>
+                <Text style={styles.changeLabelBold}>Dhuhr</Text>
                 <Text
                   style={
                     nextIqamahChange?.changes.dhuhr
@@ -804,6 +1047,7 @@ const Screen = () => {
                 </Text>
               </View>
               <View style={styles.a23FiveCard}>
+                <Text style={styles.changeLabelBold}>Asr</Text>
                 <Text
                   style={
                     nextIqamahChange?.changes.asr
@@ -815,6 +1059,7 @@ const Screen = () => {
                 </Text>
               </View>
               <View style={styles.a23FiveCard}>
+                <Text style={styles.changeLabelBold}>Maghrib</Text>
                 <Text
                   style={
                     nextIqamahChange?.changes.maghrib
@@ -826,6 +1071,7 @@ const Screen = () => {
                 </Text>
               </View>
               <View style={styles.a23FiveCard}>
+                <Text style={styles.changeLabelBold}>Isha</Text> 
                 <Text
                   style={
                     nextIqamahChange?.changes.isha
@@ -837,6 +1083,8 @@ const Screen = () => {
                 </Text>
               </View>
             </View>
+            </>
+            )}
           </View>
         </View>
         <View style={styles.bBox}>
@@ -860,11 +1108,11 @@ const Screen = () => {
             <Divider style={styles.divider} />
             <View style={styles.b13}>
               {' '}
-              <Text style={styles.b13Text}>{currentTime}</Text>{' '}
+              <Text style={styles.b13Text}>{currentTime}</Text>
+              {/* <Text style={styles.zawalText}>Zawal time ends in {currentTime}</Text> */}
             </View>
             <Divider style={styles.divider} />
             <View style={styles.b14}>
-              {' '}
               <Text style={styles.b14Text}>Next Iqamah In</Text>{' '}
             </View>
             <View style={styles.b15}>
@@ -901,6 +1149,7 @@ const Screen = () => {
                 <Text style={styles.namazLabel}>Sunset</Text>
               </View> */}
 
+
               <View style={[styles.a212FiveCard]}>
                 <Image
                   source={require('@/assets/sunrise.png')}
@@ -912,6 +1161,7 @@ const Screen = () => {
                 </Text>
                 <Text style={styles.namazLabel}>Sunrise</Text>
               </View>
+
 
               <View style={[styles.a212FiveCard]}>
                 <Image
@@ -1005,6 +1255,23 @@ const Screen = () => {
         </Animated.View>
       )}
 
+      {/* Announcement Overlay */}
+      {/* Announcement Overlay - Must be last to show on top */}
+      {showAnnouncement && (
+        <View style={styles.announcementOverlay}>
+          <BlurView
+            style={styles.blurView}
+            blurType="dark"
+            blurAmount={10}
+            reducedTransparencyFallbackColor="rgba(0, 0, 0, 0.8)"
+          />
+          <View style={styles.announcementContainer}>
+            <Text style={styles.announcementTitle}>ANNOUNCEMENT</Text>
+            <Text style={styles.announcementText}>{announcementText}</Text>
+          </View>
+        </View>
+      )}
+
       {/* Iqamah Countdown Overlay - Shows on top of everything */}
       {showIqamahCountdown && iqamahCountdownData && (
         <View style={styles.iqamahOverlay}>
@@ -1055,11 +1322,11 @@ const styles = StyleSheet.create({
   },
 
   a1: {
-    flex: 6,
+    flex: 8,
   },
 
   a2: {
-    flex: 4,
+    flex: 2,
   },
   a21: {
     flex: 5,
@@ -1082,7 +1349,7 @@ const styles = StyleSheet.create({
   },
   a22: {
     flex: 2,
-    backgroundColor: '#6d6d6d',
+    backgroundColor: '#051842',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1093,7 +1360,7 @@ const styles = StyleSheet.create({
   },
   a23FiveCard: {
     flex: 2,
-    backgroundColor: '#5c5c5c',
+    backgroundColor: '#051842',
     // backgroundColor: '#e82727',
     justifyContent: 'center',
     alignItems: 'center',
@@ -1135,11 +1402,15 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     color: '#ffffff',
   },
-
-  changeTimeBold: {
+ changeLabelBold: {
     fontSize: 18,
     fontWeight: '800',
     color: '#ffffff',
+  },
+  changeTimeBold: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#ff9800',
   },
   bBox: {
     flex: 3,
@@ -1185,6 +1456,11 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     color: '#131313',
+  },
+  zawalText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ff0000',
   },
   b14: {
     justifyContent: 'center',
@@ -1460,5 +1736,46 @@ const styles = StyleSheet.create({
 
   loadingTextCompleted: {
     color: '#333333',
+  },
+
+  announcementContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.98)',
+    paddingVertical: 40,
+    paddingHorizontal: 50,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 300,
+    maxWidth: 600,
+    borderWidth: 3,
+    borderColor: '#ff9800',
+  },
+
+  announcementTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#051842',
+    marginBottom: 20,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+
+  announcementText: {
+    fontSize: 20,
+    fontWeight: '500',
+    color: '#333333',
+    textAlign: 'center',
+    lineHeight: 32,
+  },
+
+  announcementOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9999,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

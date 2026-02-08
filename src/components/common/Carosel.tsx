@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { View, FlatList, Image, StyleSheet, Dimensions, Animated } from 'react-native';
+import { View, FlatList, Image, StyleSheet, Dimensions, Animated, Text } from 'react-native';
+import { activateKeepAwake, deactivateKeepAwake } from "@sayem314/react-native-keep-awake";
 
 const { width } = Dimensions.get('window');
 
@@ -10,6 +11,7 @@ interface Banner {
   size?: number;
   mimeType?: string;
   order?: number;
+  secondaryText?: string;
 }
 
 interface BannerCarouselProps {
@@ -17,6 +19,7 @@ interface BannerCarouselProps {
   autoScrollInterval?: number;
   width?: number;
   height?: number;
+  secondaryText?: string;
   onLastImageComplete?: () => void;
 }
 
@@ -24,7 +27,8 @@ const BannerCarousel: React.FC<BannerCarouselProps> = ({
   images,
   autoScrollInterval = 10000,
   width: carouselWidth = 680,
-  height: carouselHeight = 300,
+  secondaryText,
+  height: carouselHeight = 393,
   onLastImageComplete,
 }) => {
   const flatListRef = useRef<FlatList>(null);
@@ -32,6 +36,13 @@ const BannerCarousel: React.FC<BannerCarouselProps> = ({
   const progressAnim = useRef(new Animated.Value(0)).current;
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
+
+  useEffect(() => {
+    activateKeepAwake();
+    return () => {
+      deactivateKeepAwake();
+    };
+  }, []);
 
   // Auto-scroll effect with individual durations
   useEffect(() => {
@@ -110,6 +121,28 @@ const BannerCarousel: React.FC<BannerCarouselProps> = ({
               style={[styles.image, { width: carouselWidth, height: carouselHeight }]}
               resizeMode="stretch"
             />
+
+            {secondaryText && (
+            <View style={{ position: 'absolute', width: '100%', bottom    : 0, backgroundColor: '#b30909bb' }}>
+        <Text
+        style={
+          {
+            // position: 'absolute',
+            // bottom: 10,
+            left: "30%",
+            padding: 10,
+            justifyContent: 'center',
+            alignItems: 'center',
+            color: '#ffffff',
+            fontSize: 18,
+          }
+        }>
+{secondaryText}
+
+          
+           </Text>
+</View>
+            )}
           </View>
         )}
         onScrollToIndexFailed={() => {}}
@@ -118,7 +151,10 @@ const BannerCarousel: React.FC<BannerCarouselProps> = ({
       {/* Progress bar overlay */}
       <View style={styles.progressWrapper}>
         <View style={styles.progressBackdrop} />
-        <Animated.View style={[styles.progressFill, { width: progressWidth }]} />
+
+        <Animated.View style={[styles.progressFill, { width: progressWidth }]}>
+
+          </Animated.View>
       </View>
     </View>
   );

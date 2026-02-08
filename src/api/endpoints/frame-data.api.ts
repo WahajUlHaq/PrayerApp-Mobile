@@ -81,7 +81,9 @@ export interface MasjidConfigResponseInterface {
     year: number;
     tickerText?: string;
     maghribSunsetAdditionMinutes?: number;
-    
+    alwaysDisplayIqamaahTime?: boolean;
+    displayTimerDuration ?: number;
+    announcements?: string;
   };
 }
 
