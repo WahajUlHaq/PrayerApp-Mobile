@@ -1,12 +1,12 @@
 export const serverConfigs = {
 
   // prod
-  baseURL: 'https://prayerapp-api.wahaj.site/api',
-  socketBaseURL: 'https://prayerapp-api.wahaj.site',
+  // baseURL: 'https://prayerapp-api.wahaj.site/api',
+  // socketBaseURL: 'https://prayerapp-api.wahaj.site',
 
   // loc
-  //  baseURL: 'http://192.168.18.7:5000/api',
-  //  socketBaseURL: 'http://192.168.18.7:5000',
+   baseURL: 'http://192.168.18.7:5000/api',
+   socketBaseURL: 'http://192.168.18.7:5000',
 
   timeout: 10000,
   headers: {

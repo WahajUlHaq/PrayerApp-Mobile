@@ -4,6 +4,8 @@ import TextTicker from 'react-native-text-ticker';
 import SecondaryScreen from './SecondaryScreen';
 import { io } from 'socket.io-client';
 import { serverConfigs } from '@/constants/server-config';
+import { announcementService } from '@/services/announcement.service';
+import type { AnnouncementData, AnnouncementResponse } from '@/types/announcement.types';
 // import Ticker from "react-native-ticker";
 import { activateKeepAwake, deactivateKeepAwake } from "@sayem314/react-native-keep-awake";
 
@@ -32,6 +34,13 @@ const Screen = () => {
   useEffect(() => {
     console.log('Frame Screen mounted');
     activateKeepAwake();
+    
+    // Initialize announcement service
+    announcementService.initialize().then(() => {
+      // List all available voices for debugging
+      announcementService.listAvailableVoices();
+    });
+    
     return () => {
       deactivateKeepAwake();
     };
@@ -50,6 +59,7 @@ const Screen = () => {
   const [zawalCountdown, setZawalCountdown] = useState<string>('');
   const [announcementText, setAnnouncementText] = useState<string>('');
   const [showAnnouncement, setShowAnnouncement] = useState(false);
+  const isAnnouncingRef = useRef(false); // Prevent duplicate announcements
   const [loadingStates, setLoadingStates] = useState<{
     visible: boolean;
     apis: { name: string; loading: boolean; completed: boolean }[];
@@ -116,7 +126,7 @@ const Screen = () => {
       });
 
       // Listen for announcement trigger from server
-      socket.on('client:announce', async (data: any) => {
+      socket.on('client:announce', async (data: AnnouncementData) => {
         console.log('✅✅✅ CLIENT:ANNOUNCE EVENT RECEIVED ✅✅✅');
         console.log('Event data:', JSON.stringify(data, null, 2));
         
@@ -125,60 +135,115 @@ const Screen = () => {
           return;
         }
         
+        // Prevent duplicate announcements
+        if (isAnnouncingRef.current) {
+          console.log('⚠️ Already announcing at component level, ignoring duplicate request');
+          return;
+        }
+
+        // Check if service is busy
+        if (announcementService.getPlayingStatus()) {
+          console.log('⚠️ Announcement service busy, ignoring duplicate request');
+          return;
+        }
+        
+        isAnnouncingRef.current = true;
+        console.log('🟢 Starting new announcement...');
+        
         try {
-          // First, refetch masjid config to get the latest announcement text
-          console.log('📥 Refetching masjid config to get latest announcement...');
-          const result = await refetchMasjidConfig();
-          console.log('===== MASJID CONFIG API RESPONSE =====');
-          console.log('Full result:', JSON.stringify(result, null, 2));
-          console.log('result.data:', result.data);
-          console.log('result.data?.data:', result.data?.data);
-          console.log('======================================');
-          
-          // Get announcements text (note: plural field name)
-          let announcementFromConfig = result.data?.data?.announcements;
-          
-          // if (!announcementFromConfig) {
-          //   // Try alternative path
-          //   announcementFromConfig = result.data?.announcements;
-          // }
-          
-          console.log('Announcements from config (final):', announcementFromConfig);
-          console.log('Announcements type:', typeof announcementFromConfig);
-          
-          if (!announcementFromConfig || announcementFromConfig === '') {
-            console.log('⚠️ No announcements text in config');
+          let announcementText = '';
+          let speakDuration = 0;
+
+          // Check if we should use mobile TTS or audio file
+          if (data.useMobileTTS === true) {
+            console.log('📱 Using mobile TTS');
             
-            // Still send confirmation
+            // Use the text from socket data or fetch from config
+            if (data.text) {
+              announcementText = data.text;
+            } else {
+              // Fallback: fetch from masjid config
+              console.log('📥 Fetching announcement text from config...');
+              const result = await refetchMasjidConfig();
+              announcementText = result.data?.data?.announcements || '';
+            }
+            
+            if (!announcementText || announcementText === '') {
+              console.log('⚠️ No announcement text available');
+              
+              if (socket && socket.connected) {
+                socket.emit('client:announced', {
+                  clientId: socket.id,
+                  status: 'error',
+                  error: 'No announcement text available',
+                  timestamp: new Date().toISOString(),
+                });
+              }
+              isAnnouncingRef.current = false;
+              return;
+            }
+
+            // Parse text - replace ||| with line breaks
+            const parsedText = announcementText.replace(/\|\|\|/g, '\n');
+            
+            // Show announcement
+            setAnnouncementText(parsedText);
+            setShowAnnouncement(true);
+            
+            // Use TTS to announce
+            speakDuration = await announcementService.announce(parsedText);
+            console.log('🔊 TTS duration estimate:', speakDuration, 'ms');
+            
+          } else if (data.useMobileTTS === false && data.audioUrl) {
+            console.log('🎵 Using audio file from server');
+            console.log('🎵 Audio URL:', data.audioUrl);
+            
+            // Use text for display
+            announcementText = data.text || 'Announcement';
+            const parsedText = announcementText.replace(/\|\|\|/g, '\n');
+            
+            // Show announcement
+            setAnnouncementText(parsedText);
+            setShowAnnouncement(true);
+            
+            // Play audio file
+            speakDuration = await announcementService.playAudioFromUrl(data.audioUrl);
+            console.log('🎵 Audio duration estimate:', speakDuration, 'ms');
+            
+          } else {
+            console.log('⚠️ Invalid announcement data - missing useMobileTTS or audioUrl');
+            
             if (socket && socket.connected) {
               socket.emit('client:announced', {
                 clientId: socket.id,
-                status: 'received',
-                error: 'No announcements text in config',
+                status: 'error',
+                error: 'Invalid announcement data format',
                 timestamp: new Date().toISOString(),
               });
             }
+            isAnnouncingRef.current = false;
             return;
           }
           
-          // Parse announcements text - replace ||| with line breaks
-          const parsedAnnouncement = announcementFromConfig.replace(/\|\|\|/g, '\n');
-          console.log('📢 Showing announcement:', parsedAnnouncement);
-          console.log('📢 Setting states now...');
-          
-          // Show announcement for 5 seconds
-          setAnnouncementText(parsedAnnouncement);
-          setShowAnnouncement(true);
-          console.log('📢 States set - showAnnouncement should be TRUE');
-          console.log('📢 announcementText:', parsedAnnouncement);
-          
+          // Hide announcement after playback is complete
           setTimeout(() => {
             if (isMounted) {
-              console.log('⏰ Hiding announcement after 5 seconds');
+              console.log('⏰ Hiding announcement after completion');
               setShowAnnouncement(false);
               setAnnouncementText('');
+              isAnnouncingRef.current = false; // Allow next announcement
             }
-          }, 5000);
+          }, speakDuration);
+          
+          // Safety timeout - force reset after maximum duration (2 minutes)
+          setTimeout(() => {
+            if (isMounted && isAnnouncingRef.current) {
+              console.log('⚠️ Safety timeout triggered - forcing reset');
+              setShowAnnouncement(false);
+              setAnnouncementText('');
+              isAnnouncingRef.current = false;
+            }
+          }, Math.max(speakDuration + 5000, 120000)); // Max 2 minutes
           
           // Confirm announcement received
           if (socket && socket.connected) {
@@ -186,11 +251,24 @@ const Screen = () => {
             socket.emit('client:announced', {
               clientId: socket.id,
               status: 'received',
+              usedTTS: data.useMobileTTS,
               timestamp: new Date().toISOString(),
             });
           }
         } catch (error) {
           console.error('❌ Error processing announcement:', error);
+          
+          // Clean up on error
+          isAnnouncingRef.current = false;
+          setShowAnnouncement(false);
+          setAnnouncementText('');
+          
+          // Stop any ongoing playback
+          try {
+            await announcementService.stopAll();
+          } catch (stopError) {
+            console.error('❌ Error stopping playback:', stopError);
+          }
           
           // Send error confirmation
           if (socket && socket.connected) {
@@ -341,6 +419,14 @@ const Screen = () => {
 
     return () => {
       isMounted = false;
+      
+      // Stop any ongoing announcements (both TTS and audio)
+      isAnnouncingRef.current = false;
+      announcementService.stopAll();
+      
+      // Cleanup announcement service
+      announcementService.cleanup();
+      
       if (socket) {
         try {
           socket.off('connect');
