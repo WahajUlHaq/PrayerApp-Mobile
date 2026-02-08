@@ -138,10 +138,10 @@ const Screen = () => {
           // Get announcements text (note: plural field name)
           let announcementFromConfig = result.data?.data?.announcements;
           
-          if (!announcementFromConfig) {
-            // Try alternative path
-            announcementFromConfig = result.data?.announcements;
-          }
+          // if (!announcementFromConfig) {
+          //   // Try alternative path
+          //   announcementFromConfig = result.data?.announcements;
+          // }
           
           console.log('Announcements from config (final):', announcementFromConfig);
           console.log('Announcements type:', typeof announcementFromConfig);
@@ -354,7 +354,7 @@ const Screen = () => {
         }
       }
     };
-  }, [refetchNamaz, refetchBanners, refetchMasjidConfig, refetchIqamah, refetchPages, masjidConfig?.data?.announcement]);
+  }, [refetchNamaz, refetchBanners, refetchMasjidConfig, refetchIqamah, refetchPages]);
 
   const handleLastImageComplete = () => {
     // Check if pages data has length
