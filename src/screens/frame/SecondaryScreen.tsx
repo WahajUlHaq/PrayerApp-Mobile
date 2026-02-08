@@ -100,7 +100,7 @@ const SecondaryScreen: React.FC<SecondaryScreenProps> = ({
               <Image
                 source={{ uri: currentPage.imageUrl }}
                 style={styles.pageImage}
-                resizeMode="contain"
+                resizeMode="stretch"
               />
             )}
             
@@ -241,9 +241,8 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    // padding: 30,
-    // backgroundColor: '#1ba24841',
     overflow: 'hidden',
+    position: 'relative',
   },
   pageTitle: {
     fontSize: 36,
@@ -260,6 +259,11 @@ const styles = StyleSheet.create({
     lineHeight: 32,
   },
   pageImage: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     width: '100%',
     height: '100%',
   },

@@ -35,11 +35,8 @@ const Screen = () => {
     console.log('Frame Screen mounted');
     activateKeepAwake();
     
-    // Initialize announcement service
-    announcementService.initialize().then(() => {
-      // List all available voices for debugging
-      announcementService.listAvailableVoices();
-    });
+    // Initialize announcement service (audio only)
+    announcementService.initialize();
     
     return () => {
       deactivateKeepAwake();
@@ -142,108 +139,40 @@ const Screen = () => {
         }
 
         // Check if service is busy
-        if (announcementService.getPlayingStatus()) {
-          console.log('⚠️ Announcement service busy, ignoring duplicate request');
+        if (announcementService.getDisplayingStatus()) {
+          console.log('⚠️ Announcement already displaying, ignoring duplicate request');
           return;
         }
         
         isAnnouncingRef.current = true;
+        announcementService.setDisplaying(true);
         console.log('🟢 Starting new announcement...');
         
         try {
-          let announcementText = '';
-          let speakDuration = 0;
-
-          // Check if we should use mobile TTS or audio file
-          if (data.useMobileTTS === true) {
-            console.log('📱 Using mobile TTS');
-            
-            // Use the text from socket data or fetch from config
-            if (data.text) {
-              announcementText = data.text;
-            } else {
-              // Fallback: fetch from masjid config
-              console.log('📥 Fetching announcement text from config...');
-              const result = await refetchMasjidConfig();
-              announcementText = result.data?.data?.announcements || '';
-            }
-            
-            if (!announcementText || announcementText === '') {
-              console.log('⚠️ No announcement text available');
-              
-              if (socket && socket.connected) {
-                socket.emit('client:announced', {
-                  clientId: socket.id,
-                  status: 'error',
-                  error: 'No announcement text available',
-                  timestamp: new Date().toISOString(),
-                });
-              }
-              isAnnouncingRef.current = false;
-              return;
-            }
-
-            // Parse text - replace ||| with line breaks
-            const parsedText = announcementText.replace(/\|\|\|/g, '\n');
-            
-            // Show announcement
-            setAnnouncementText(parsedText);
-            setShowAnnouncement(true);
-            
-            // Use TTS to announce
-            speakDuration = await announcementService.announce(parsedText);
-            console.log('🔊 TTS duration estimate:', speakDuration, 'ms');
-            
-          } else if (data.useMobileTTS === false && data.audioUrl) {
-            console.log('🎵 Using audio file from server');
-            console.log('🎵 Audio URL:', data.audioUrl);
-            
-            // Use text for display
-            announcementText = data.text || 'Announcement';
-            const parsedText = announcementText.replace(/\|\|\|/g, '\n');
-            
-            // Show announcement
-            setAnnouncementText(parsedText);
-            setShowAnnouncement(true);
-            
-            // Play audio file
-            speakDuration = await announcementService.playAudioFromUrl(data.audioUrl);
-            console.log('🎵 Audio duration estimate:', speakDuration, 'ms');
-            
-          } else {
-            console.log('⚠️ Invalid announcement data - missing useMobileTTS or audioUrl');
-            
-            if (socket && socket.connected) {
-              socket.emit('client:announced', {
-                clientId: socket.id,
-                status: 'error',
-                error: 'Invalid announcement data format',
-                timestamp: new Date().toISOString(),
-              });
-            }
-            isAnnouncingRef.current = false;
-            return;
-          }
+          // Get announcement text
+          const announcementText = data.text || 'Announcement';
+          const parsedText = announcementText.replace(/\|\|\|/g, '\n');
           
-          // Hide announcement after playback is complete
+          console.log('📢 Displaying announcement:', parsedText);
+          
+          // Show announcement on screen
+          setAnnouncementText(parsedText);
+          setShowAnnouncement(true);
+          
+          // Calculate display duration based on text length
+          const displayDuration = announcementService.calculateDisplayDuration(parsedText);
+          console.log('⏱️ Display duration:', displayDuration, 'ms');
+          
+          // Hide announcement after display duration
           setTimeout(() => {
             if (isMounted) {
               console.log('⏰ Hiding announcement after completion');
               setShowAnnouncement(false);
               setAnnouncementText('');
-              isAnnouncingRef.current = false; // Allow next announcement
-            }
-          }, speakDuration);
-          
-          // Safety timeout - force reset after maximum duration (2 minutes)
-          setTimeout(() => {
-            if (isMounted && isAnnouncingRef.current) {
-              console.log('⚠️ Safety timeout triggered - forcing reset');
-              setShowAnnouncement(false);
-              setAnnouncementText('');
               isAnnouncingRef.current = false;
+              announcementService.setDisplaying(false);
             }
-          }, Math.max(speakDuration + 5000, 120000)); // Max 2 minutes
+          }, displayDuration);
           
           // Confirm announcement received
           if (socket && socket.connected) {
@@ -251,7 +180,6 @@ const Screen = () => {
             socket.emit('client:announced', {
               clientId: socket.id,
               status: 'received',
-              usedTTS: data.useMobileTTS,
               timestamp: new Date().toISOString(),
             });
           }
@@ -260,15 +188,9 @@ const Screen = () => {
           
           // Clean up on error
           isAnnouncingRef.current = false;
+          announcementService.setDisplaying(false);
           setShowAnnouncement(false);
           setAnnouncementText('');
-          
-          // Stop any ongoing playback
-          try {
-            await announcementService.stopAll();
-          } catch (stopError) {
-            console.error('❌ Error stopping playback:', stopError);
-          }
           
           // Send error confirmation
           if (socket && socket.connected) {
@@ -420,9 +342,8 @@ const Screen = () => {
     return () => {
       isMounted = false;
       
-      // Stop any ongoing announcements (both TTS and audio)
+      // Stop any ongoing announcements
       isAnnouncingRef.current = false;
-      announcementService.stopAll();
       
       // Cleanup announcement service
       announcementService.cleanup();
@@ -738,7 +659,7 @@ const Screen = () => {
         setZawalCountdown('');
       }
       
-      // Check if any Iqamah is within 30 seconds
+      // Check if any Iqamah is within 60 seconds (1 minute)
       
       // console.log('Checking Iqamah schedule:', iqamahSchedule.length, 'items');
       
@@ -753,7 +674,7 @@ const Screen = () => {
         
         // console.log(`${item.name} Iqamah in ${secondsUntilIqamah} seconds`);
         
-        if (secondsUntilIqamah > 0 && secondsUntilIqamah <= 30) {
+        if (secondsUntilIqamah > 0 && secondsUntilIqamah <= 60) {
           // console.log(`SHOWING COUNTDOWN for ${item.name}!`);
           setShowIqamahCountdown(true);
           setIqamahCountdownData({
@@ -764,9 +685,9 @@ const Screen = () => {
         }
       }
       
-      // If no Iqamah within 30 seconds, hide countdown
+      // If no Iqamah within 60 seconds (1 minute), hide countdown
       if (showIqamahCountdown) {
-        // console.log('Hiding countdown - no Iqamah within 30 seconds');
+        // console.log('Hiding countdown - no Iqamah within 60 seconds');
         setShowIqamahCountdown(false);
         setIqamahCountdownData(null);
       }
